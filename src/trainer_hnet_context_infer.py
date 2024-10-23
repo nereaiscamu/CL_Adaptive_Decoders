@@ -231,6 +231,18 @@ class ContinualLearningTrainer:
 
         prev_hnet = deepcopy(self.hnet)
 
+        # Generate empty lists to store results
+        train_losses = []
+        val_losses = []
+        change_detect_epoch = []
+        prev_context = []
+        prev_min_loss = []
+        prev_mean_loss = []
+        new_context = []
+        new_min_loss = []
+        new_mean_loss = []
+        similarity_scores = []
+
         # Main training loop
         for epoch in range(num_epochs):
             for phase in ['train', 'val']:
@@ -282,10 +294,136 @@ class ContinualLearningTrainer:
                             if self.confidence_context[self.active_context] > 0.9 and self.deviate_from_mean(modulation, self.active_context):
                                 reactivation = False
                                 self.new_context = True
+                                if epoch == 0:
+                                    for c in range(len(self.context_error)):
+                                        self.thresholds_contexts[c] += 0.2      #  Final version 0.2      
+
+                                # Covariance-based task detection
                                 
-                                self.update_context(rolling_mean_covariance, epoch)
+                                similar_task_found, similar_task_index = self.is_similar_to_previous_tasks(
+                                    rolling_mean_covariance 
+                                )
+                                if similar_task_found:
+                                    print('Found similarities with other covariance matrix')
+                                    self.active_context = similar_task_index
+                                    print('New context is ', self.active_context)
+                                    reactivation = True
+                                    self.thresholds_contexts[self.active_context] =  2.2 # for stimulation data 1.01                 
+                            
+                                for context in range(len(self.context_error)):
+                                    W = self.hnet(cond_id=context)
+                                    model = RNN_Main_Model(
+                                        num_features=self.model.num_features, 
+                                        hnet_output=W,  
+                                        hidden_size=self.model.hidden_size,
+                                        num_layers=self.model.num_layers, 
+                                        out_dims=self.model.out_features,  
+                                        dropout=self.model.dropout_value, 
+                                        LSTM_=LSTM_
+                                    ).to(self.device)
+                                    y_pred = model(x, hx)
+                                    m = F.huber_loss(y_pred, y, delta=delta)
+                                    print(m)
+                                    thrs_context = self.thresholds_contexts[context]
+                                    print(thrs_context * torch.mean(self.context_error[context][-1000:-1])) # Stimulation data [-100:-1]
+                                    
+                                    change_detect_epoch.append(epoch)
+                                    prev_context.append(self.active_context)
+                                    prev_min_loss.append(torch.min(self.context_error[self.active_context][-15:-1].min(), modulation).detach().cpu().numpy())
+                                    prev_mean_loss.append(torch.mean(self.context_error[self.active_context][-1000:-1]).detach().cpu().numpy()) # Stimulation data [-100:-1]
+                                    new_context.append(context)
+                                    new_min_loss.append(m.detach().cpu().numpy())
+                                    new_mean_loss.append(thrs_context * torch.mean(self.context_error[context][-1000:-1]).detach().cpu().numpy())  # Stimulation data [-100:-1]
 
 
+                                    # Calculate similarity score
+                                    diff = torch.abs(rolling_mean_covariance - self.task_covariances[context])
+                                    similarity_score_ = diff.mean().item()
+                                    print('Similarity', similarity_score_)
+                                    similarity_scores.append(similarity_score_)
+
+
+                                    if similar_task_found == False:
+                                        #### Test using loss.
+                                        if m < (thrs_context * torch.mean(self.context_error[context][-1000:-1])): # Stimulation data [-100:-1]
+                                            reactivation = True
+                                            self.active_context = context
+                                            self.thresholds_contexts[context] = 2.2  # for stimulation data 1.01
+                                            break
+
+                                if not reactivation:
+                                    self.confidence_context.append(0)
+                                    self.active_context = len(self.context_error)
+                                    self.n_contexts += 1
+                                    self.context_error.append(self.context_error_0)
+                                    prev_hnet = deepcopy(self.hnet)
+                                    self.rolling_covariances = [] # Added on 08/08/2024
+                            
+                            else:
+                                self.confidence_context[self.active_context] += (1 - self.confidence_context[self.active_context]) * 0.005
+                                self.context_error[self.active_context][-1] = modulation
+                                self.update_covariance_for_context(context)
+
+
+                    else:
+                        # Get prediction with current context. 
+                        W, y_pred = self.predict_with_hnet(context, LSTM_, x, hx)
+
+                        loss = F.huber_loss(y_pred, y, delta=delta)
+                        loss_task = loss
+
+                    assert torch.isfinite(loss_task)
+                    running_loss += loss_task.item()
+                    running_size += 1
+
+                running_loss /= running_size
+                if phase == "train":
+                    train_losses.append(running_loss)
+                else:
+                    val_losses.append(running_loss)
+                    if running_loss < best_loss:
+                        best_loss = running_loss
+                        best_model_wts = deepcopy(self.hnet.state_dict())
+                        final_active_context = self.active_context
+                        final_n_contexts = self.n_contexts
+                        final_context_error = self.context_error
+                        final_sim_scores = similarity_scores
+                        not_increased = 0
+                    else:
+                        if epoch > 10:
+                            not_increased += 1
+                            if not_increased == early_stop:
+                                for g in optimizer.param_groups:
+                                    g['lr'] = g['lr'] / 2
+                                not_increased = 0
+                                end_train += 1
+                            
+                            if end_train == 1:
+                                self.hnet.load_state_dict(best_model_wts)
+                                self.context_error = final_context_error
+                                self.active_context = final_active_context
+                                self.n_contexts = final_n_contexts
+                                similarity_scores = final_sim_scores if len(final_sim_scores) > 0 else ['No similarities']
+                                print('Final active context :', self.active_context)
+                                return self.hnet, np.array(train_losses), np.array(val_losses),\
+                                     change_detect_epoch,prev_context, prev_min_loss,\
+                                        prev_mean_loss, new_context, \
+                                        new_min_loss,new_mean_loss, similarity_scores, self.active_context
+            print('Num contexts after epoch ', epoch, len(self.context_error))                
+            scheduler.step()
+
+        self.hnet.load_state_dict(best_model_wts)
+        self.context_error = final_context_error
+        self.active_context = final_active_context
+        self.n_contexts = final_n_contexts
+        similarity_scores = final_sim_scores if len(final_sim_scores) > 0 else ['No similarities']
+        print('Final active context :', self.active_context)
+        
+        return self.hnet, np.array(train_losses),  np.array(val_losses), change_detect_epoch,\
+              prev_context, prev_min_loss,\
+                  prev_mean_loss, new_context, \
+                  new_min_loss,new_mean_loss, similarity_scores, self.active_context
+                            
 
     def predict_with_hnet(self, context, LSTM_, x, hx):
         """
@@ -336,20 +474,3 @@ class ContinualLearningTrainer:
                                     prev_task_embs=prev_task_embs,
                                 )
         return loss_reg
-
-    def update_context(self, rolling_mean_covariance, epoch):
-        """Update the context parameters when a new context is detected."""
-        self.context_error.append(self.context_error_0)
-        self.confidence_context.append(0)
-
-        # Reset the active context
-        self.active_context += 1
-
-        # Update covariance for the new context
-        self.update_covariance_for_context(self.active_context)
-
-        # Log the new context update
-        print(f"New context added at epoch {epoch}. Active context: {self.active_context}")
-
-
-# SEGUIR POR AQUÍ PARA COMO CAMBIAR DE CONTEXT. 
