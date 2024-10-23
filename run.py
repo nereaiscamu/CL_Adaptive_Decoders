@@ -143,7 +143,7 @@ class Run_Experiment_Block3:
         hnet (HMLP): An instance of the HyperMLP class configured for the task.
         """
 
-        param_shapes = [p.shape for p in list(self._initialize_task_detector().parameters())]
+        param_shapes = [p.shape for p in list(self._initialize_template_model().parameters())]
         hnet = HMLP(param_shapes, uncond_in_size=0,
                     cond_in_size=self.config.emb_size,
                     layers=self.config.hidden_layers_hnet,
@@ -155,13 +155,13 @@ class Run_Experiment_Block3:
         hnet.apply_hyperfan_init()  # Initialize weights with Hyperfan initialization
         return hnet
 
-    def _initialize_task_detector(self):
+    def _initialize_template_model(self):
 
         """
-        Initializes the appropriate task detector (LSTM or RNN) based on the configuration settings.
+        Initializes the appropriate template model to know the output shape for the hypernetwork.
 
         Returns:
-        task_detector (Causal_Simple_LSTM or Causal_Simple_RNN): An instance of the selected task detector class.
+        template model (Causal_Simple_LSTM or Causal_Simple_RNN): An instance of the selected class.
         """
 
         if self.LSTM:
