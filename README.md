@@ -5,10 +5,6 @@
 
 The repository is organized to facilitate ease of use, ensuring that preprocessing, modeling, and analysis are straightforward for users.
 
-<div align="center">
-  <img src="assets/overview.png" alt="Project Overview" width="110%">
-</div>
-
 ## Repository Structure
 The project is organized into several key directories:
 
@@ -75,8 +71,3 @@ Trained models saved in the Models directory.
 - Preprocessed data ready for analysis.
 - Results visualized in the Notebooks.
 
-#### Contributing
-Contributions to enhance the capabilities of this repository are welcome. Please submit issues and pull requests for any enhancements or fixes.
-```bash
-csharp
-```
