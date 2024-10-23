@@ -39,7 +39,7 @@ Ensure that you have Python 3.x and the necessary libraries installed. You can s
 #### Installation Steps
 ```bash
 pip install -r requirements.txt
-
+```
 
 ### Configuration
 Edit the `config.json` file to adjust parameters for your experiments, including data paths and model hyperparameters.
@@ -53,7 +53,7 @@ Before training your models, you must preprocess the data using the provided scr
 Run the preprocessing script as follows:
 ```bash
 python Data/Preprocessing_Stimulation_Data.py
-
+```
 
 This will prepare the raw MATLAB data for subsequent modeling.
 
@@ -61,6 +61,7 @@ This will prepare the raw MATLAB data for subsequent modeling.
 To run the continual learning model on the preprocessed neural data, execute the main script:
 ```bash
 python run.py
+```
 
 This script initializes the training process based on the configurations specified in config.json.
 
@@ -78,3 +79,4 @@ Trained models saved in the Models directory.
 Contributions to enhance the capabilities of this repository are welcome. Please submit issues and pull requests for any enhancements or fixes.
 ```bash
 csharp
+```
